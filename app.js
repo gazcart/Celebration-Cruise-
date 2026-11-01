@@ -85,7 +85,7 @@
   function loadFromSrc(src) {
     const img = new Image();
     img.onload = () => setupImage(img);
-    img.onerror = () => alert('Sorry, that image could not be opened. Try a JPG or PNG photo.');
+    img.onerror = () => { $('#uploadView').hidden = false; $('#editor').hidden = true; window.setTimeout(() => window.alert && window.alert('Sorry, that image could not be opened. Try a JPG or PNG photo.'), 0); };
     img.src = src;
   }
 
@@ -778,7 +778,11 @@
     const a = document.createElement('a');
     a.download = 'refurb-preview.jpg';
     a.href = canvas.toDataURL('image/jpeg', 0.92);
-    a.click();
+    // Embedded pages and some phones block downloads: also show the image to long-press / right-click and save
+    let embedded = false; try { embedded = window.self !== window.top; } catch (_) { embedded = true; }
+    if (embedded || /iPhone|iPad|Android/i.test(navigator.userAgent)) {
+      $('#saveImg').src = a.href; $('#saveOverlay').hidden = false;
+    } else a.click();
     compose();
   };
   $('#newBtn').onclick = () => { $('#file').value = ''; $('#editor').hidden = true; $('#uploadView').hidden = false; $('#suggestion').hidden = true; S.aiActive = false; };
@@ -792,6 +796,7 @@
   ['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
   drop.addEventListener('drop', (e) => { const f = e.dataTransfer.files[0]; if (f) loadFromSrc(URL.createObjectURL(f)); });
   $('#sampleBtn').onclick = makeSample;
+  $('#saveClose').onclick = () => { $('#saveOverlay').hidden = true; };
 
   buildSwatches();
 

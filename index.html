@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Refurb Vision – See your wooden furniture renovated</title>
   <meta name="description" content="Upload a photo of an old wooden furniture unit and preview it sanded and varnished, painted, or with new handles and knobs." />
   <link rel="stylesheet" href="styles.css" />
@@ -123,6 +123,14 @@
       <p class="disclaimer">Previews are an artistic impression to help you imagine the result. Real colours and finishes vary with timber type, preparation and lighting.</p>
     </section>
   </main>
+
+  <div class="overlay" id="saveOverlay" hidden>
+    <div class="overlay-box">
+      <p><strong>Press and hold the picture</strong> (or right-click) and choose <em>Save image</em>.</p>
+      <img id="saveImg" alt="Your renovation preview" />
+      <button class="btn primary" id="saveClose" type="button">Done</button>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>
