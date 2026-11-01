@@ -134,6 +134,8 @@ input[type=color] { width: 44px; height: 32px; border: none; background: none; p
 .file-input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 0; }
 .status { margin: 0; padding: 10px 14px; border-radius: 10px; background: #fff3dc; font-size: .92rem; text-align: center; }
 .status.err { background: #fde3dc; color: #8a2a12; }
+.embed-note { margin: 0; font-size: .85rem; color: var(--muted); text-align: center; max-width: 360px; }
+.embed-note a { color: var(--accent); font-weight: 600; }
 
 </style>
 </head>
@@ -153,6 +155,8 @@ input[type=color] { width: 44px; height: 32px; border: none; background: none; p
         <span>Tap to choose a photo or take one. Front-on photos in good light work best.</span>
       </label>
       <p class="status" id="status" hidden></p>
+      <p class="embed-note" id="embedNote" hidden>Nothing happens when you tap? The Claude phone app can't open your photos.
+        <a href="https://claude.ai/artifact/FiKNngAvD4WCoFHJx29ptF" target="_blank" rel="noopener">Open this page in your browser</a> (e.g. Chrome) and upload from there.</p>
       <button class="link" id="sampleBtn" type="button">No photo handy? Try a sample chest of drawers</button>
     </section>
 
@@ -1196,6 +1200,8 @@ input[type=color] { width: 44px; height: 32px; border: none; background: none; p
   $('#saveClose').onclick = () => { $('#saveOverlay').hidden = true; };
 
   buildSwatches();
+  // inside an embedded viewer (e.g. the Claude app) the photo picker may be blocked: show a way out
+  try { if (window.self !== window.top) $('#embedNote').hidden = false; } catch (_) { $('#embedNote').hidden = false; }
 
   // small hook for automated testing
   window.__refurb = { S, setView, suggest, compose, setMaskMode };

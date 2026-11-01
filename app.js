@@ -930,6 +930,8 @@
   $('#saveClose').onclick = () => { $('#saveOverlay').hidden = true; };
 
   buildSwatches();
+  // inside an embedded viewer (e.g. the Claude app) the photo picker may be blocked: show a way out
+  try { if (window.self !== window.top) $('#embedNote').hidden = false; } catch (_) { $('#embedNote').hidden = false; }
 
   // small hook for automated testing
   window.__refurb = { S, setView, suggest, compose, setMaskMode };
