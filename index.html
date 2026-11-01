@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Refurb Vision – See your wooden furniture renovated</title>
+  <meta name="description" content="Upload a photo of an old wooden furniture unit and preview it sanded and varnished, painted, or with new handles and knobs." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="top">
+    <h1>Refurb<span>Vision</span></h1>
+    <p>Preview your old wooden furniture renovated – before you pick up the sandpaper.</p>
+  </header>
+
+  <main>
+    <!-- Upload -->
+    <section id="uploadView" class="upload">
+      <label class="drop" id="drop">
+        <input type="file" id="file" accept="image/*" hidden />
+        <div class="drop-icon">🪑</div>
+        <strong>Upload a photo of your furniture</strong>
+        <span>Tap to choose a photo or take one. Front-on photos in good light work best.</span>
+      </label>
+      <button class="link" id="sampleBtn" type="button">No photo handy? Try a sample chest of drawers</button>
+    </section>
+
+    <!-- Editor -->
+    <section id="editor" class="editor" hidden>
+      <div class="stage">
+        <canvas id="canvas"></canvas>
+        <div class="badge" id="badge">Original</div>
+        <div class="hint" id="hint" hidden></div>
+      </div>
+
+      <div class="compare">
+        <span>After</span>
+        <input type="range" id="split" min="0" max="100" value="0" aria-label="Before and after comparison" />
+        <span>Before</span>
+      </div>
+
+      <nav class="looks" aria-label="Looks">
+        <button class="look active" data-panel="original">📷<span>Original</span></button>
+        <button class="look" data-panel="varnish">✨<span>Sanded &amp; Varnished</span></button>
+        <button class="look" data-panel="paint">🎨<span>Painted</span></button>
+        <button class="look ai" data-panel="ai">🎲<span>AI Suggest</span></button>
+        <button class="look" data-panel="hardware">🔩<span>Handles &amp; Knobs</span></button>
+      </nav>
+
+      <!-- AI suggestion card -->
+      <div class="card suggestion" id="suggestion" hidden>
+        <div class="sugg-head">
+          <small>AI designer suggests</small>
+          <h3 id="suggTitle"></h3>
+        </div>
+        <p id="suggWhy"></p>
+        <ul id="suggSpec" class="spec"></ul>
+        <button class="btn primary" id="anotherBtn" type="button">🎲 Suggest another look</button>
+      </div>
+
+      <!-- Panels -->
+      <div class="card panel" data-for="original">
+        <p>This is your piece as photographed. Choose a look above to see it renovated. Use the slider above the buttons to compare before and after.</p>
+      </div>
+
+      <div class="card panel" data-for="varnish" hidden>
+        <h3>Sanded &amp; varnished</h3>
+        <p class="muted">Scuffs are smoothed out, the grain is brought back and a stain / varnish is applied.</p>
+        <div class="label">Stain colour</div>
+        <div class="swatches" id="stainSwatches"></div>
+        <label class="row">Finish <span class="muted" id="varnishSheenLbl">Satin</span>
+          <input type="range" id="varnishSheen" min="0" max="100" value="45" />
+        </label>
+      </div>
+
+      <div class="card panel" data-for="paint" hidden>
+        <h3>Painted</h3>
+        <p class="muted">Furniture paint over the sanded wood, keeping the shape and shading of your piece.</p>
+        <div class="label">Paint colour</div>
+        <div class="swatches" id="paintSwatches"></div>
+        <label class="row">Custom colour <input type="color" id="customPaint" value="#7f8f6a" /></label>
+        <label class="row">Finish <span class="muted" id="paintSheenLbl">Satin</span>
+          <input type="range" id="paintSheen" min="0" max="100" value="30" />
+        </label>
+        <label class="row">Wood grain showing through
+          <input type="range" id="grain" min="0" max="100" value="35" />
+        </label>
+      </div>
+
+      <div class="card panel" data-for="hardware" hidden>
+        <h3>Handles &amp; knobs</h3>
+        <p class="muted"><strong>Tap the photo on each existing handle or knob</strong> to swap it. Drag to move. This only changes the hardware – the finish stays as it is.</p>
+        <div class="label">Style</div>
+        <div class="chips" id="hwKinds"></div>
+        <div class="label">Finish</div>
+        <div class="swatches" id="hwFinishes"></div>
+        <label class="row">Size <input type="range" id="hwSize" min="15" max="90" value="38" /></label>
+        <label class="row">Cover old handle <input type="range" id="hwCover" min="0" max="250" value="130" /></label>
+        <div class="btn-row">
+          <button class="btn" id="rotateBtn" type="button">↻ Rotate selected</button>
+          <button class="btn" id="deleteBtn" type="button">🗑 Remove selected</button>
+          <button class="btn" id="clearBtn" type="button">Clear all</button>
+        </div>
+      </div>
+
+      <details class="card area">
+        <summary>🖌 Fix which part is the furniture</summary>
+        <p class="muted">The app guesses which part of the photo is wood. If the wall or floor is being changed too, or part of the unit is missed, fix it here.</p>
+        <div class="chips" id="maskModes">
+          <button class="chip active" data-mask="auto" type="button">Auto detect</button>
+          <button class="chip" data-mask="whole" type="button">Whole photo</button>
+          <button class="chip" data-mask="add" type="button">Brush: add</button>
+          <button class="chip" data-mask="erase" type="button">Brush: remove</button>
+        </div>
+        <label class="row">Brush size <input type="range" id="brush" min="10" max="150" value="50" /></label>
+        <label class="row check"><input type="checkbox" id="showMask" /> Highlight the furniture area</label>
+      </details>
+
+      <div class="actions">
+        <button class="btn primary" id="downloadBtn" type="button">⬇ Save image</button>
+        <button class="btn" id="newBtn" type="button">New photo</button>
+      </div>
+      <p class="disclaimer">Previews are an artistic impression to help you imagine the result. Real colours and finishes vary with timber type, preparation and lighting.</p>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
