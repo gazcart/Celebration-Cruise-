@@ -19,6 +19,6 @@ python3 -m http.server 8000
 # then visit http://localhost:8000
 ```
 
-It can also be hosted as-is on GitHub Pages (Settings → Pages → deploy from this branch).
+Live at https://gazcart.github.io/Celebration-Cruise-/ (served from the `gh-pages` branch).
 
 The "AI Suggest" button uses a built-in, on-device design engine (photo analysis + curated style rules), so it needs no API key or internet connection.
