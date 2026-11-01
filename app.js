@@ -46,6 +46,7 @@
   };
   // footprint in units of "size" (width, height) when horizontal
   const HW_KINDS = {
+    keep: { name: 'Keep original', fp: [1, 1] },
     knob: { name: 'Round knob', fp: [1, 1] },
     square: { name: 'Square knob', fp: [0.9, 0.9] },
     tbar: { name: 'T-bar knob', fp: [1.5, 0.5] },
@@ -66,7 +67,7 @@
     view: 'original',
     stain: 'natural', varnishSheen: 0.45,
     paint: '#9aac87', paintSheen: 0.3, grain: 0.35,
-    hw: { kind: 'knob', finish: 'brass', size: 38, cover: 1.3 },
+    hw: { kind: 'keep', finish: 'brass', size: 38, cover: 1 },
     items: [], sel: -1,
     tool: null,            // 'hw' | 'add' | 'erase'
     maskMode: 'auto',
@@ -82,15 +83,47 @@
   const maskCanvas = document.createElement('canvas');
 
   // ---------- Image setup ----------
-  function loadFromSrc(src) {
+  function loadError(msg) {
+    $('#uploadView').hidden = false; $('#editor').hidden = true;
+    setStatus(msg || 'Sorry, that photo could not be opened. Try a different photo (JPG or PNG).', true);
+  }
+  function setStatus(msg, isErr) {
+    const el = $('#status'); el.textContent = msg || ''; el.hidden = !msg; el.classList.toggle('err', !!isErr);
+  }
+
+  function loadFromSrc(src, onFail) {
     const img = new Image();
-    img.onload = () => setupImage(img);
-    img.onerror = () => { $('#uploadView').hidden = false; $('#editor').hidden = true; window.setTimeout(() => window.alert && window.alert('Sorry, that image could not be opened. Try a JPG or PNG photo.'), 0); };
+    img.onload = () => { try { setupImage(img); } catch (err) { (onFail || loadError)(); } };
+    img.onerror = () => (onFail || loadError)();
     img.src = src;
+  }
+
+  // Phones (especially in-app browsers) are picky, so try several ways to read the photo.
+  async function loadFile(file) {
+    if (!file) return;
+    setStatus('Loading your photo…');
+    await new Promise((r) => setTimeout(r, 30));
+    if (window.createImageBitmap) {
+      try {
+        let bmp;
+        try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (_) { bmp = await createImageBitmap(file); }
+        setupImage(bmp); return;
+      } catch (_) { /* fall through */ }
+    }
+    const viaReader = () => {
+      try {
+        const fr = new FileReader();
+        fr.onload = () => loadFromSrc(fr.result);
+        fr.onerror = () => loadError();
+        fr.readAsDataURL(file);
+      } catch (_) { loadError(); }
+    };
+    try { loadFromSrc(URL.createObjectURL(file), viaReader); } catch (_) { viaReader(); }
   }
 
   function setupImage(img) {
     let w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+    if (!w || !h) throw new Error('empty image');
     const k = Math.min(1, MAX_SIDE / Math.max(w, h));
     w = Math.round(w * k); h = Math.round(h * k);
     S.w = w; S.h = h;
@@ -100,8 +133,10 @@
     octx.drawImage(img, 0, 0, w, h);
     S.orig = octx.getImageData(0, 0, w, h).data;
     precompute();
-    S.items = []; S.sel = -1; S.split = 0; $('#split').value = 0;
+    S.split = 0; $('#split').value = 0;
     setMaskMode('auto');
+    detectHardware();
+    setStatus('');
     $('#uploadView').hidden = true;
     $('#editor').hidden = false;
     setView('original');
@@ -183,13 +218,13 @@
         S.mask = new Float32Array(S.w * S.h).fill(1);
         showHint('Couldn\'t find much wood – applying to the whole photo', 3000);
       } else S.mask = new Float32Array(S.autoMask);
-      setTool(S.view === 'hardware' ? 'hw' : null);
+      setTool(null);
     } else if (mode === 'whole') {
       S.mask = new Float32Array(S.w * S.h).fill(1);
-      setTool(S.view === 'hardware' ? 'hw' : null);
+      setTool(null);
     } else if (mode === 'custom') {
       // finished brushing: keep the painted mask
-      setTool(S.view === 'hardware' ? 'hw' : null);
+      setTool(null);
       return;
     } else {
       setTool(mode);
@@ -305,8 +340,10 @@
   function patchOld(data, w, h, it) {
     const s = hwUnit(), fp = HW_KINDS[S.hw.kind].fp, c = S.hw.cover;
     if (c <= 0.01) return;
-    let hw2 = Math.max(fp[0], 1) * s * c / 2, hh2 = Math.max(fp[1], 1) * s * c / 2;
-    if (it.rot) [hw2, hh2] = [hh2, hw2];
+    let nw = fp[0] * s, nh = fp[1] * s;
+    if (it.rot) [nw, nh] = [nh, nw];
+    const pad = w * 0.006;
+    const hw2 = Math.max(nw * 0.55, (it.ow || s) * 0.62 + pad) * c, hh2 = Math.max(nh * 0.55, (it.oh || s) * 0.62 + pad) * c;
     const x0 = Math.max(1, Math.round(it.x - hw2)), x1 = Math.min(w - 2, Math.round(it.x + hw2));
     const y0 = Math.max(1, Math.round(it.y - hh2)), y1 = Math.min(h - 2, Math.round(it.y + hh2));
     if (x1 <= x0 || y1 <= y0) return;
@@ -416,6 +453,82 @@
     c.restore();
   }
 
+  // Find the existing handles/knobs: small, compact spots that stand out from the wood around them.
+  function detectHardware() {
+    const { w, h, L, Lshade, sr, sg, sb } = S, n = w * h;
+    const reg = blur(S.mask, w, h, Math.max(4, Math.round(w / 40)));
+    const sat = new Float32Array(n);
+    for (let i = 0; i < n; i++) { const mx = Math.max(sr[i], sg[i], sb[i]), mn = Math.min(sr[i], sg[i], sb[i]); sat[i] = mx > 0 ? (mx - mn) / mx : 0; }
+    const satB = blur(sat, w, h, Math.max(6, Math.round(w / 45)));
+    const raw = new Float32Array(n);
+    for (let i = 0; i < n; i++) raw[i] = Math.abs(L[i] - Lshade[i]) + 0.5 * Math.abs(sat[i] - satB[i]);
+    const c = blur(raw, w, h, Math.max(1, Math.round(w / 500)));
+    let m = 0, m2 = 0, cnt = 0;
+    for (let i = 0; i < n; i += 3) if (reg[i] > 0.55) { m += c[i]; m2 += c[i] * c[i]; cnt++; }
+    if (!cnt) { S.items = []; return; }
+    m /= cnt; const sd = Math.sqrt(Math.max(0, m2 / cnt - m * m));
+    const thr = Math.max(0.06, m + 2.4 * sd);
+
+    // connected components on a downsampled grid
+    const f = Math.max(1, Math.round(w / 450)), dw = Math.floor(w / f), dh = Math.floor(h / f);
+    const bin = new Uint8Array(dw * dh);
+    for (let y = 0; y < dh; y++) for (let x = 0; x < dw; x++) {
+      const i = (y * f) * w + x * f; if (reg[i] > 0.55 && c[i] > thr) bin[y * dw + x] = 1;
+    }
+    const seen = new Uint8Array(dw * dh), stack = [], found = [];
+    for (let start = 0; start < bin.length; start++) {
+      if (!bin[start] || seen[start]) continue;
+      let area = 0, sx = 0, sy = 0, sc = 0, x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1;
+      stack.push(start); seen[start] = 1;
+      while (stack.length) {
+        const q = stack.pop(), x = q % dw, y = (q / dw) | 0;
+        area++; sx += x; sy += y; sc += c[(y * f) * w + x * f];
+        if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+        if (x > 0 && bin[q - 1] && !seen[q - 1]) { seen[q - 1] = 1; stack.push(q - 1); }
+        if (x < dw - 1 && bin[q + 1] && !seen[q + 1]) { seen[q + 1] = 1; stack.push(q + 1); }
+        if (y > 0 && bin[q - dw] && !seen[q - dw]) { seen[q - dw] = 1; stack.push(q - dw); }
+        if (y < dh - 1 && bin[q + dw] && !seen[q + dw]) { seen[q + dw] = 1; stack.push(q + dw); }
+      }
+      const bw = (x1 - x0 + 1) * f, bh = (y1 - y0 + 1) * f, mn = Math.min(bw, bh), mx = Math.max(bw, bh);
+      const fill = area / ((x1 - x0 + 1) * (y1 - y0 + 1));
+      const asp = mx / mn;
+      if (mn < w * 0.009 || mx > w * 0.16 || asp > 12 || fill < (asp > 4 ? 0.6 : 0.3)) continue;
+      const cx = (sx / area) * f + f / 2, cy = (sy / area) * f + f / 2;
+      // must be surrounded by furniture on (nearly) all sides
+      const off = mx * 0.6 + w * 0.012;
+      const around = [[cx - off, cy], [cx + off, cy], [cx, cy - off], [cx, cy + off]]
+        .filter(([px, py]) => px >= 0 && py >= 0 && px < w && py < h && reg[(py | 0) * w + (px | 0)] > 0.5).length;
+      if (around < 4) continue;
+      // measure the full handle (the core above is only its most contrasting part)
+      const lo = m + 0.9 * sd, lim = mx * 0.8 + w * 0.03;
+      const reach = (dx, dy) => { let d = 0; for (; d < lim; d++) { const px = Math.round(cx + dx * d), py = Math.round(cy + dy * d); if (px < 0 || py < 0 || px >= w || py >= h || c[py * w + px] < lo) break; } return d; };
+      const ow = Math.max(bw, reach(-1, 0) + reach(1, 0)), oh = Math.max(bh, reach(0, -1) + reach(0, 1));
+      found.push({ x: cx, y: cy, ow, oh, rot: oh > ow * 1.4 ? 1 : 0, score: (sc / area) * fill });
+    }
+    found.sort((a, b) => b.score - a.score);
+    const best = found.length ? found[0].score : 0;
+    const items = [];
+    for (const it of found) {
+      if (it.score < best * 0.35 || items.length >= 30) break;
+      if (items.some((o) => Math.abs(o.x - it.x) < (o.ow + it.ow) * 0.45 && Math.abs(o.y - it.y) < (o.oh + it.oh) * 0.45)) continue;
+      items.push(it);
+    }
+    S.items = items; S.sel = -1;
+    if (items.length) {
+      const sizes = items.map((it) => { const mx = Math.max(it.ow, it.oh), mn = Math.min(it.ow, it.oh); return mx / mn < 1.8 ? mx * 1.35 : mx / 3.3; }).sort((a, b) => a - b);
+      S.hw.size = clamp(Math.round(sizes[sizes.length >> 1] * 1000 / w), 15, 90);
+      $('#hwSize').value = S.hw.size;
+    }
+    updateHwCount();
+  }
+
+  function updateHwCount() {
+    const el = $('#hwCount'); if (!el) return;
+    el.textContent = S.items.length
+      ? `Found ${S.items.length} handle${S.items.length === 1 ? '' : 's'} on your furniture – pick a style below to change them all.`
+      : 'No handles found automatically. Tap “Fix handle spots”, then tap once on each handle.';
+  }
+
   function hitItem(p) {
     const s = hwUnit();
     for (let k = S.items.length - 1; k >= 0; k--) {
@@ -429,19 +542,21 @@
     if (!S.finished) return;
     const { w, h } = S;
     const img = new ImageData(new Uint8ClampedArray(S.finished.data), w, h);
-    for (const it of S.items) patchOld(img.data, w, h, it);
+    const s = hwUnit(), showHw = S.hw.kind !== 'keep';
+    if (showHw) for (const it of S.items) patchOld(img.data, w, h, it);
     ctx.putImageData(img, 0, 0);
-    const s = hwUnit();
-    for (const it of S.items) drawHardware(ctx, it.x, it.y, s, S.hw.kind, S.hw.finish, it.rot);
+    if (showHw) for (const it of S.items) drawHardware(ctx, it.x, it.y, s, S.hw.kind, S.hw.finish, it.rot);
 
     if (!clean) {
       if (S.showMask && S.mask) drawMaskOverlay();
-      if (S.tool === 'hw' && S.sel >= 0 && S.items[S.sel]) {
-        const it = S.items[S.sel];
-        ctx.save(); ctx.strokeStyle = '#fff'; ctx.lineWidth = Math.max(2, w / 400); ctx.setLineDash([6, 5]);
-        ctx.shadowColor = 'rgba(0,0,0,.6)'; ctx.shadowBlur = 4;
-        const fp = HW_KINDS[S.hw.kind].fp; const R = Math.max(fp[0], fp[1]) * s * 0.65 + 6;
-        ctx.beginPath(); ctx.arc(it.x, it.y, R, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+      if (S.tool === 'hw') {
+        ctx.save(); ctx.lineWidth = Math.max(2, w / 350); ctx.setLineDash([6, 5]);
+        ctx.shadowColor = 'rgba(0,0,0,.7)'; ctx.shadowBlur = 4; ctx.strokeStyle = '#fff';
+        for (const it of S.items) {
+          const R = Math.max(it.ow || s, it.oh || s) * 0.6 + w * 0.012;
+          ctx.beginPath(); ctx.arc(it.x, it.y, R, 0, Math.PI * 2); ctx.stroke();
+        }
+        ctx.restore();
       }
       if (S.split > 0) {
         const x = w * S.split;
@@ -475,8 +590,8 @@
     $$('.panel').forEach((p) => { p.hidden = p.dataset.for !== v; });
     if (v !== 'hardware' && S.tool === 'hw') setTool(null);
     if (v === 'hardware') {
-      if (S.maskMode !== 'add' && S.maskMode !== 'erase') setTool('hw');
-      showHint(S.items.length ? 'Tap a handle to select · drag to move' : 'Tap on each old handle or knob to replace it', 3500);
+      updateHwCount();
+      showHint(S.items.length ? `Pick a style to change all ${S.items.length} handles at once` : 'Tap “Fix handle spots” to mark your handles', 3500);
     }
     updateBadge();
     renderFinish(); compose();
@@ -484,13 +599,26 @@
 
   function updateBadge() {
     let label = VIEW_LABEL[S.view];
-    if (S.view === 'hardware' && S.baseView && S.baseView !== 'original') label = VIEW_LABEL[S.baseView] + ' + new hardware';
+    if (S.view === 'hardware') {
+      const base = S.baseView && S.baseView !== 'original' ? VIEW_LABEL[S.baseView] : 'Original';
+      label = S.hw.kind === 'keep' ? base : base + ' + new handles';
+    }
     if (S.aiActive && S.lastLook && S.view !== 'original') label = '🎲 ' + S.lastLook.name;
     $('#badge').textContent = label;
   }
 
+  function setEditSpots(on) {
+    if (on && (S.maskMode === 'add' || S.maskMode === 'erase')) setMaskMode('custom');
+    setTool(on ? 'hw' : null);
+    if (on) showHint('Tap a missed handle to add it · tap a circle to remove it', 4000);
+    compose();
+  }
+
   function setTool(t) {
     S.tool = t;
+    const b = $('#editSpotsBtn');
+    b.classList.toggle('primary', t === 'hw');
+    b.textContent = t === 'hw' ? '✓ Done fixing spots' : '✏️ Fix handle spots';
     canvas.classList.toggle('tool', !!t);
   }
 
@@ -522,7 +650,10 @@
       const b = document.createElement('button'); b.type = 'button'; b.className = 'chip' + (id === S.hw.kind ? ' active' : ''); b.dataset.kind = id;
       const icon = document.createElement('canvas'); icon.width = 68; icon.height = 40;
       b.appendChild(icon); b.appendChild(document.createTextNode(k.name));
-      b.onclick = () => { S.hw.kind = id; S.aiActive = false; markActive(hk, b); updateBadge(); compose(); };
+      b.onclick = () => {
+        S.hw.kind = id; S.aiActive = false; markActive(hk, b); updateBadge(); compose();
+        if (!S.items.length && id !== 'keep') showHint('No handles marked yet – tap “Fix handle spots”', 3500);
+      };
       hk.appendChild(b);
     });
     const hf = $('#hwFinishes');
@@ -540,6 +671,7 @@
       const c = b.querySelector('canvas').getContext('2d');
       c.clearRect(0, 0, 68, 40);
       const kind = b.dataset.kind;
+      if (kind === 'keep') { c.font = '22px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('↺', 34, 21); return; }
       if (kind === 'none') { c.strokeStyle = '#aaa'; c.lineWidth = 2; c.setLineDash([4, 3]); c.strokeRect(10, 8, 48, 24); return; }
       const s = { bar: 17, cup: 22, leather: 20, ring: 20, tbar: 30 }[kind] || 26;
       drawHardware(c, 34, kind === 'ring' ? 18 : 20, s, kind, S.hw.finish, 0);
@@ -645,7 +777,7 @@
     const hwName = look.kind === 'none' ? 'Handles removed (push-to-open)' : `${HW_FINISHES[look.finish].name} ${HW_KINDS[look.kind].name.toLowerCase()}s`;
     $('#suggTitle').textContent = look.name;
     $('#suggWhy').textContent = describe(a) + ' ' + look.why;
-    $('#suggSpec').innerHTML = `<li>${finishName}</li><li>${hwName}${S.items.length ? '' : ' – open <b>Handles &amp; Knobs</b> and tap your old handles to see them'}</li>`;
+    $('#suggSpec').innerHTML = `<li>${finishName}</li><li>${hwName}${S.items.length ? '' : ' – open <b>Handles &amp; Knobs</b> and tap <b>Fix handle spots</b> to mark your handles'}</li>`;
     $('#suggestion').hidden = false;
 
     S.view = look.mode; S.baseView = null;
@@ -716,7 +848,7 @@
     return { x: (e.clientX - r.left) * S.w / r.width, y: (e.clientY - r.top) * S.h / r.height };
   }
 
-  let drag = null, painting = false, raf = 0, needFinish = false;
+  let painting = false, raf = 0, needFinish = false;
   function schedule(finish) {
     needFinish = needFinish || finish;
     if (raf) return;
@@ -728,20 +860,19 @@
     const p = canvasPos(e);
     canvas.setPointerCapture(e.pointerId);
     if (S.tool === 'hw') {
-      let k = hitItem(p);
-      if (k < 0) { S.items.push({ x: p.x, y: p.y, rot: 0 }); k = S.items.length - 1; }
-      S.sel = k; drag = { k, dx: S.items[k].x - p.x, dy: S.items[k].y - p.y };
-      schedule(false);
+      const k = hitItem(p);
+      if (k >= 0) S.items.splice(k, 1);
+      else { const o = hwUnit(); S.items.push({ x: p.x, y: p.y, rot: 0, ow: o, oh: o }); }
+      updateHwCount(); schedule(false);
     } else {
       painting = true; paintMask(p); schedule(true);
     }
     e.preventDefault();
   });
   canvas.addEventListener('pointermove', (e) => {
-    if (drag) { const p = canvasPos(e); const it = S.items[drag.k]; it.x = p.x + drag.dx; it.y = p.y + drag.dy; schedule(false); }
-    else if (painting) { paintMask(canvasPos(e)); schedule(true); }
+    if (painting) { paintMask(canvasPos(e)); schedule(true); }
   });
-  const endPointer = () => { drag = null; painting = false; };
+  const endPointer = () => { painting = false; };
   canvas.addEventListener('pointerup', endPointer);
   canvas.addEventListener('pointercancel', endPointer);
 
@@ -759,9 +890,9 @@
   $('#customPaint').oninput = (e) => { S.paint = e.target.value; S.aiActive = false; markActive($('#paintSwatches'), null); updateBadge(); schedule(true); };
   $('#hwSize').oninput = (e) => { S.hw.size = +e.target.value; schedule(false); };
   $('#hwCover').oninput = (e) => { S.hw.cover = e.target.value / 100; schedule(false); };
-  $('#rotateBtn').onclick = () => { const it = S.items[S.sel]; if (it) { it.rot = it.rot ? 0 : 1; compose(); } else showHint('Tap a handle on the photo first'); };
-  $('#deleteBtn').onclick = () => { if (S.sel >= 0) { S.items.splice(S.sel, 1); S.sel = S.items.length - 1; compose(); } else showHint('Tap a handle on the photo first'); };
-  $('#clearBtn').onclick = () => { S.items = []; S.sel = -1; compose(); };
+  $('#editSpotsBtn').onclick = () => setEditSpots(S.tool !== 'hw');
+  $('#redetectBtn').onclick = () => { detectHardware(); compose(); showHint(S.items.length ? `Found ${S.items.length} handles` : 'No handles found – use Fix handle spots'); };
+  $('#rotateAllBtn').onclick = () => { S.items.forEach((it) => { it.rot = it.rot ? 0 : 1; }); compose(); };
   $('#split').oninput = (e) => { S.split = e.target.value / 100; schedule(false); };
   $$('#maskModes .chip').forEach((c) => c.addEventListener('click', () => setMaskMode(c.dataset.mask)));
   $('#brush').oninput = (e) => { S.brush = +e.target.value; };
@@ -789,12 +920,12 @@
 
   $('#file').addEventListener('change', (e) => {
     const f = e.target.files && e.target.files[0];
-    if (f) loadFromSrc(URL.createObjectURL(f));
+    loadFile(f);
   });
   const drop = $('#drop');
   ['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('over'); }));
   ['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
-  drop.addEventListener('drop', (e) => { const f = e.dataTransfer.files[0]; if (f) loadFromSrc(URL.createObjectURL(f)); });
+  drop.addEventListener('drop', (e) => { const f = e.dataTransfer.files[0]; loadFile(f); });
   $('#sampleBtn').onclick = makeSample;
   $('#saveClose').onclick = () => { $('#saveOverlay').hidden = true; };
 

@@ -17,11 +17,12 @@
     <!-- Upload -->
     <section id="uploadView" class="upload">
       <label class="drop" id="drop">
-        <input type="file" id="file" accept="image/*" hidden />
+        <input type="file" id="file" accept="image/*" class="file-input" aria-label="Upload a photo" />
         <div class="drop-icon">🪑</div>
         <strong>Upload a photo of your furniture</strong>
         <span>Tap to choose a photo or take one. Front-on photos in good light work best.</span>
       </label>
+      <p class="status" id="status" hidden></p>
       <button class="link" id="sampleBtn" type="button">No photo handy? Try a sample chest of drawers</button>
     </section>
 
@@ -89,17 +90,17 @@
 
       <div class="card panel" data-for="hardware" hidden>
         <h3>Handles &amp; knobs</h3>
-        <p class="muted"><strong>Tap the photo on each existing handle or knob</strong> to swap it. Drag to move. This only changes the hardware – the finish stays as it is.</p>
-        <div class="label">Style</div>
+        <p class="muted" id="hwCount"></p>
+        <div class="label">Style – changes every handle at once</div>
         <div class="chips" id="hwKinds"></div>
         <div class="label">Finish</div>
         <div class="swatches" id="hwFinishes"></div>
         <label class="row">Size <input type="range" id="hwSize" min="15" max="90" value="38" /></label>
-        <label class="row">Cover old handle <input type="range" id="hwCover" min="0" max="250" value="130" /></label>
+        <label class="row">Cover old handles <input type="range" id="hwCover" min="0" max="200" value="100" /></label>
         <div class="btn-row">
-          <button class="btn" id="rotateBtn" type="button">↻ Rotate selected</button>
-          <button class="btn" id="deleteBtn" type="button">🗑 Remove selected</button>
-          <button class="btn" id="clearBtn" type="button">Clear all</button>
+          <button class="btn" id="editSpotsBtn" type="button">✏️ Fix handle spots</button>
+          <button class="btn" id="rotateAllBtn" type="button">↻ Turn all sideways</button>
+          <button class="btn" id="redetectBtn" type="button">🔍 Find handles again</button>
         </div>
       </div>
 
